@@ -14,6 +14,7 @@ import { getRedisConnection } from "../../coins2";
 import chainToCoingeckoId, { cgPlatformtoChainId } from "../../../common/chainToCoingeckoId";
 import {
   fetchCgPriceData,
+  fetchCgMarketsData,
   retryCoingeckoRequest,
 } from "../utils/getCoinsUtils";
 import { storeAllTokens } from "../utils/shared/bridgedTvlPostgres";
@@ -194,6 +195,31 @@ async function getAndStoreCoins(coins: Coin[], rejected: Coin[]) {
 
   await storeCoinData(confidentCoins);
   await storeHistoricalCoinData(confidentCoins);
+
+  // Fetch FDV from /coins/markets and persist it for coins that have a value
+  try {
+    const coinIds = coins.map((c) => c.id);
+    const marketsData = await fetchCgMarketsData(coinIds);
+    const fdvMap: { [cgId: string]: number } = {};
+    for (const item of marketsData) {
+      if (item.id && item.fully_diluted_valuation > 0) {
+        fdvMap[item.id] = item.fully_diluted_valuation;
+      }
+    }
+    const fdvWrites = Object.entries(fdvMap).map(([cgId, fdv]) => ({
+      PK: cgPK(cgId),
+      SK: 0,
+      fdv,
+      confidence: 0.9,
+    }));
+    if (fdvWrites.length > 0) {
+      await batchWrite(fdvWrites, false);
+      sdk.log(`Wrote ${fdvWrites.length} coingecko FDV entries`);
+    }
+  } catch (e) {
+    console.error(`[scripts - getAndStoreCoins] Non-fatal error storing FDV: ${(e as Error).message}`);
+  }
+
   const filteredCoins = coins.filter(
     (coin) =>
       coinData[coin.id]?.usd !== undefined && !staleIds.includes(coin.id),
