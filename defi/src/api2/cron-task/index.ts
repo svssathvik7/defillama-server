@@ -16,6 +16,7 @@ import * as sdk from '@defillama/sdk'
 import { RUN_TYPE, runWithRuntimeLogging } from "../utils";
 import { genFormattedChains } from "./genFormattedChains";
 import { fetchRWAStats } from "../../rwa";
+import { storeTokenMetrics } from "./tokenMetrics";
 import { sendMessage } from "../../utils/discord";
 import { extraSections, chainKeyToLabelMap } from "../../utils/normalizeChain";
 import { dailyTvl, hourlyTvl, hourlyUsdTokensTvl } from "../../utils/getLastRecord";
@@ -88,6 +89,7 @@ async function run() {
   await storeRouteData('outdated', await getOutdated(getLastHourlyRecord))
 
   await storeRWAStats()
+  await storeTokenMetrics()
 
   await genFormattedChains()
 
