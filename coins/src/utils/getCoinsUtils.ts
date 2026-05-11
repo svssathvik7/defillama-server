@@ -88,3 +88,23 @@ export async function fetchCgPriceData(
     log,
   );
 }
+
+export async function fetchCgMarketsData(
+  coinIds: string[],
+  log: boolean = false,
+): Promise<any[]> {
+  const BATCH_SIZE = 250;
+  const results: any[] = [];
+  for (let i = 0; i < coinIds.length; i += BATCH_SIZE) {
+    const batch = coinIds.slice(i, i + BATCH_SIZE);
+    const res = await retryCoingeckoRequest(
+      `coins/markets?vs_currency=usd&ids=${batch.join(",")}&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=false&precision=full`,
+      10,
+      log,
+    );
+    if (Array.isArray(res)) {
+      results.push(...res);
+    }
+  }
+  return results;
+}
