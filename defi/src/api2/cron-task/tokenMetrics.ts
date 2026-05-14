@@ -1,6 +1,7 @@
 /**
  * Cron task: builds a consolidated token market metrics cache file.
- * Stored at the route "tokenMetrics" via storeRouteData.
+ * Stored at the route "token-metrics" via storeRouteData, served by the
+ * GET /token-metrics handler in api2/routes.
  *
  * Pulls together price, market cap, FDV, 24h volume, and approximate
  * DEX liquidity for every protocol/parent-protocol that has a gecko_id.
@@ -60,6 +61,16 @@ export interface TokenMetricsRow {
 // ─── main ───────────────────────────────────────────────────────────────────
 
 export async function storeTokenMetrics(): Promise<void> {
+  try {
+    await _storeTokenMetrics();
+  } catch (e) {
+    // Match the storeRWAStats pattern: failures here are non-fatal — the
+    // surrounding cron run should continue with downstream tasks.
+    console.error("[tokenMetrics] failed:", e);
+  }
+}
+
+async function _storeTokenMetrics(): Promise<void> {
   // 1. Collect all items (protocols + parents) that have a gecko_id
   type SourceItem = { id: string; name: string; symbol?: string | null; gecko_id: string | null };
 
@@ -93,8 +104,10 @@ export async function storeTokenMetrics(): Promise<void> {
 
   console.log(`[tokenMetrics] Fetching metrics for ${coinKeys.length} gecko_ids`);
 
-  // Batch by 500 — same chunk size as other consumers of these endpoints.
-  const chunks = chunkArray(coinKeys, 500);
+  // Batch by 200 — keeps the GET-fallback prices URL well under common
+  // 8KB nginx defaults (200 * ~30 chars ≈ 6KB). POST endpoints handle more
+  // but a single chunk size keeps the four parallel calls aligned.
+  const chunks = chunkArray(coinKeys, 200);
 
   const pricesMap: Record<string, { price?: number; timestamp?: number }> = {};
   const mcapsMap: Record<string, { mcap?: number; timestamp?: number }> = {};
@@ -210,8 +223,10 @@ export async function storeTokenMetrics(): Promise<void> {
     rows.push(row);
   }
 
-  // 6. Persist
-  await storeRouteData("tokenMetrics", {
+  // 6. Persist — name matches the public route /token-metrics. The cache
+  // normalizer would accept either form, but keeping them aligned avoids
+  // confusion when grepping.
+  await storeRouteData("token-metrics", {
     data: rows,
     updatedAt: Math.floor(Date.now() / 1000),
   });
