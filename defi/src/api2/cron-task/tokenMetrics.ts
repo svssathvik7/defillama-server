@@ -6,11 +6,18 @@
  * DEX liquidity for every protocol/parent-protocol that has a gecko_id.
  */
 
+import axios from "axios";
 import { storeRouteData } from "../cache/file-cache";
 import protocols from "../../protocols/data";
 import parentProtocols from "../../protocols/parentProtocols";
 import type { Protocol } from "../../protocols/types";
 import type { IParentProtocol } from "../../protocols/types";
+import {
+  fetchCurrentPrices,
+  fetchMcaps,
+  fetchFdvs,
+  fetchCoinVolumes,
+} from "../../utils/coinsApi";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -28,57 +35,6 @@ function isPositiveFinite(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v > 0;
 }
 
-/** Generic JSON GET helper. */
-async function fetchJson(url: string): Promise<any> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-
-/** Generic JSON POST helper. */
-async function postJson(url: string, body: unknown): Promise<any> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`POST ${url} → ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-
-// ─── API shapes ─────────────────────────────────────────────────────────────
-
-interface PriceEntry {
-  price?: number;
-  symbol?: string;
-  timestamp?: number;
-  confidence?: number;
-}
-
-interface McapEntry {
-  mcap?: number;
-  timestamp?: number;
-}
-
-interface FdvEntry {
-  fdv?: number;
-  timestamp?: number;
-}
-
-interface VolumeEntry {
-  volume?: number;
-  timestamp?: number;
-}
-
-type PricesResponse = { coins: Record<string, PriceEntry> };
-type McapsResponse  = Record<string, McapEntry>;
-type FdvsResponse   = Record<string, FdvEntry>;
-type VolumesResponse = Record<string, VolumeEntry>;
-
 // ─── output row ─────────────────────────────────────────────────────────────
 
 export interface TokenMetricsRow {
@@ -90,7 +46,15 @@ export interface TokenMetricsRow {
   mcap?: number;
   fdv?: number;
   volume24h?: number;
-  liquidity?: number;
+  /**
+   * Approximate aggregate DEX TVL routed to this token via
+   * yields.llama.fi pool symbols. Symbol-matched only — overcounts shared
+   * symbols (e.g. multiple "USDC" tokens) and undercounts tokens whose
+   * symbol doesn't appear directly in pool symbols.
+   * Pools whose composite symbol contains an ambiguous token (≤ 2 chars
+   * or in the common-symbol skiplist) are dropped to limit pollution.
+   */
+  dexLiquidity?: number;
 }
 
 // ─── main ───────────────────────────────────────────────────────────────────
@@ -129,96 +93,73 @@ export async function storeTokenMetrics(): Promise<void> {
 
   console.log(`[tokenMetrics] Fetching metrics for ${coinKeys.length} gecko_ids`);
 
-  // 2. Prices — GET, coin keys in URL, batch by 100
-  const pricesMap: Record<string, PriceEntry> = {};
-  const priceChunks = chunkArray(coinKeys, 100);
-  for (const chunk of priceChunks) {
-    try {
-      const url = `https://coins.llama.fi/prices/current/${chunk.join(",")}`;
-      const data: PricesResponse = await fetchJson(url);
-      Object.assign(pricesMap, data?.coins ?? {});
-    } catch (e) {
-      console.error("[tokenMetrics] prices fetch failed for a chunk:", e);
-    }
-  }
+  // Batch by 500 — same chunk size as other consumers of these endpoints.
+  const chunks = chunkArray(coinKeys, 500);
 
-  // 3. Mcaps / FDVs / coinVolumes — POST, batch by 500
-  const mcapsMap: McapsResponse = {};
-  const fdvsMap: FdvsResponse = {};
-  const volumesMap: VolumesResponse = {};
-
-  const postChunks = chunkArray(coinKeys, 500);
+  const pricesMap: Record<string, { price?: number; timestamp?: number }> = {};
+  const mcapsMap: Record<string, { mcap?: number; timestamp?: number }> = {};
+  const fdvsMap: Record<string, { fdv?: number; timestamp?: number }> = {};
+  const volumesMap: Record<string, { volume?: number; timestamp?: number }> = {};
 
   await Promise.all(
-    postChunks.map(async (chunk) => {
-      const body = { coins: chunk };
-
+    chunks.map(async (chunk) => {
       await Promise.all([
-        (async () => {
-          try {
-            const data: McapsResponse = await postJson("https://coins.llama.fi/mcaps", body);
-            Object.assign(mcapsMap, data ?? {});
-          } catch (e) {
-            console.error("[tokenMetrics] mcaps fetch failed for a chunk:", e);
-          }
-        })(),
-        (async () => {
-          try {
-            const data: FdvsResponse = await postJson("https://coins.llama.fi/fdvs", body);
-            Object.assign(fdvsMap, data ?? {});
-          } catch (e) {
-            console.error("[tokenMetrics] fdvs fetch failed for a chunk:", e);
-          }
-        })(),
-        (async () => {
-          try {
-            const data: VolumesResponse = await postJson("https://coins.llama.fi/coinVolumes", body);
-            Object.assign(volumesMap, data ?? {});
-          } catch (e) {
-            console.error("[tokenMetrics] coinVolumes fetch failed for a chunk:", e);
-          }
-        })(),
+        fetchCurrentPrices(chunk)
+          .then((r) => Object.assign(pricesMap, r?.coins ?? {}))
+          .catch((e) => console.error("[tokenMetrics] prices fetch failed for chunk:", e)),
+        fetchMcaps(chunk)
+          .then((r) => Object.assign(mcapsMap, r ?? {}))
+          .catch((e) => console.error("[tokenMetrics] mcaps fetch failed for chunk:", e)),
+        fetchFdvs(chunk)
+          .then((r) => Object.assign(fdvsMap, r ?? {}))
+          .catch((e) => console.error("[tokenMetrics] fdvs fetch failed for chunk:", e)),
+        fetchCoinVolumes(chunk)
+          .then((r) => Object.assign(volumesMap, r ?? {}))
+          .catch((e) => console.error("[tokenMetrics] coinVolumes fetch failed for chunk:", e)),
       ]);
-    })
+    }),
   );
 
-  // 4. Yields pools → approximate DEX liquidity per gecko_id
+  // Approximate per-token DEX liquidity from yields.llama.fi pool symbols.
   //
-  // NOTE: This is an approximation (v1). Each pool's tvlUsd is split evenly
-  // across its underlyingTokens addresses, but we have no reliable on-chain
-  // address → gecko_id mapping at this point.  Instead we fall back to a
-  // symbol-based heuristic: we build a symbol→gecko_id lookup from the
-  // protocol list and match each pool's `symbol` field against it.  This
-  // will overcount pools whose symbols are shared by multiple tokens (e.g.
-  // "ETH"), but it is good enough as a v1 signal.
+  // This is symbol-matching only — there is no reliable address→gecko_id map
+  // at this layer. It overcounts shared symbols and undercounts tokens whose
+  // ticker doesn't appear in pool symbols. Mitigations: skip ambiguous short
+  // tickers and well-known polysemous symbols rather than smearing TVL onto
+  // every gecko_id that happens to use "BTC"/"ETH".
+  const AMBIGUOUS_SYMBOLS = new Set([
+    // Wrappers and short tickers that resolve to many distinct tokens across chains
+    "ETH", "WETH", "BTC", "WBTC", "USDC", "USDT", "DAI", "BNB", "WBNB",
+    "SOL", "WSOL", "MATIC", "AVAX", "FTM", "OP", "ARB",
+  ]);
   const symbolToGeckoId = new Map<string, string>();
   for (const item of deduped) {
-    if (typeof item.symbol === "string" && item.symbol.trim()) {
-      const sym = item.symbol.trim().toUpperCase();
-      if (!symbolToGeckoId.has(sym)) {
-        symbolToGeckoId.set(sym, item.gecko_id);
-      }
-    }
+    if (typeof item.symbol !== "string") continue;
+    const sym = item.symbol.trim().toUpperCase();
+    if (sym.length < 3) continue;
+    if (AMBIGUOUS_SYMBOLS.has(sym)) continue;
+    if (!symbolToGeckoId.has(sym)) symbolToGeckoId.set(sym, item.gecko_id);
   }
 
   const liquidityByGeckoId: Record<string, number> = {};
 
   try {
-    const yieldsData: { data: Array<{ symbol: string; tvlUsd: number; underlyingTokens?: string[] }> } =
-      await fetchJson("https://yields.llama.fi/pools");
-
-    for (const pool of yieldsData?.data ?? []) {
-      const { symbol, tvlUsd } = pool;
-      if (!isPositiveFinite(tvlUsd)) continue;
-
-      // Attempt symbol-based match (pool symbol may be composite like "USDC-ETH")
-      const parts = typeof symbol === "string" ? symbol.toUpperCase().split(/[-/]/) : [];
-      for (const part of parts) {
-        const gid = symbolToGeckoId.get(part.trim());
-        if (gid) {
-          // Split evenly across matched parts (approximation)
-          liquidityByGeckoId[gid] = (liquidityByGeckoId[gid] ?? 0) + tvlUsd / parts.length;
-        }
+    const yieldsRes = await axios.get<{
+      data: Array<{ symbol?: string; tvlUsd?: number }>;
+    }>("https://yields.llama.fi/pools");
+    for (const pool of yieldsRes.data?.data ?? []) {
+      if (!isPositiveFinite(pool.tvlUsd)) continue;
+      if (typeof pool.symbol !== "string") continue;
+      const parts = pool.symbol.toUpperCase().split(/[-/]/).map((p) => p.trim()).filter(Boolean);
+      if (parts.length === 0) continue;
+      // Drop the pool entirely if any leg is ambiguous — better to undercount
+      // than smear TVL across unrelated tokens that share a symbol.
+      if (parts.some((p) => AMBIGUOUS_SYMBOLS.has(p) || p.length < 3)) continue;
+      const matched = parts.map((p) => symbolToGeckoId.get(p)).filter((g): g is string => !!g);
+      if (matched.length === 0) continue;
+      const share = pool.tvlUsd! / parts.length;
+      for (const gid of matched) {
+        liquidityByGeckoId[gid] = (liquidityByGeckoId[gid] ?? 0) + share;
       }
     }
   } catch (e) {
@@ -263,7 +204,7 @@ export async function storeTokenMetrics(): Promise<void> {
 
     const liq = liquidityByGeckoId[item.gecko_id];
     if (isPositiveFinite(liq)) {
-      row.liquidity = liq;
+      row.dexLiquidity = liq;
     }
 
     rows.push(row);
@@ -279,13 +220,3 @@ export async function storeTokenMetrics(): Promise<void> {
 }
 
 export default storeTokenMetrics;
-
-// Allow direct CLI execution: `ts-node tokenMetrics.ts`
-if (require.main === module) {
-  storeTokenMetrics()
-    .catch((e) => {
-      console.error("[tokenMetrics] Fatal error:", e);
-      process.exit(1);
-    })
-    .then(() => process.exit(0));
-}

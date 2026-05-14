@@ -5,13 +5,12 @@ export const tokenMetricsItemSchema = z.object({
   defillamaId: z.string(),
   name: z.string(),
   gecko_id: z.string(),
-  symbol: z.string(),
+  symbol: z.string().optional(),
   price: z.number().optional(),
   mcap: z.number().optional(),
   fdv: z.number().optional(),
   volume24h: z.number().optional(),
-  liquidity: z.number().optional(),
-  updatedAt: z.number(),
+  dexLiquidity: z.number().optional(),
 });
 
 // Token metrics response schema
