@@ -55,6 +55,7 @@ async function storeCoinData(coinData: Write[]) {
       SK: 0,
       price: c.price,
       mcap: c.mcap,
+      fdv: c.fdv,
       timestamp: c.timestamp,
       symbol: c.symbol,
       confidence: c.confidence,
@@ -103,7 +104,22 @@ const ignoredChainSet = new Set([
 ]);
 
 async function getAndStoreCoins(coins: Coin[], rejected: Coin[]) {
-  const coinData = await fetchCgPriceData(coins.map((c) => c.id));
+  const coinIds = coins.map((c) => c.id);
+  // /simple/price doesn't return FDV — pull it from /coins/markets in parallel.
+  // Markets call is best-effort: if it fails we still ingest price/mcap.
+  const [coinData, marketsData] = await Promise.all([
+    fetchCgPriceData(coinIds),
+    fetchCgMarketsData(coinIds).catch((e) => {
+      console.error(`[scripts - getAndStoreCoins] fetchCgMarketsData failed: ${(e as Error).message}`);
+      return [] as Awaited<ReturnType<typeof fetchCgMarketsData>>;
+    }),
+  ]);
+  const fdvMap: { [cgId: string]: number } = {};
+  for (const m of marketsData) {
+    if (m?.id && typeof m.fully_diluted_valuation === "number" && m.fully_diluted_valuation > 0) {
+      fdvMap[m.id] = m.fully_diluted_valuation;
+    }
+  }
   await storeCGCoinMetadatas(coinData);
 
   const timestamp = getCurrentUnixTimestamp();
@@ -169,6 +185,7 @@ async function getAndStoreCoins(coins: Coin[], rejected: Coin[]) {
           SK: data.last_updated_at,
           price: data.usd,
           mcap: data.usd_market_cap,
+          fdv: fdvMap[cgId],
           timestamp: data.last_updated_at,
           symbol: idToSymbol[cgId].toUpperCase().trim().replace(/\x00/g, ""),
           confidence: 0.99,
@@ -195,30 +212,6 @@ async function getAndStoreCoins(coins: Coin[], rejected: Coin[]) {
 
   await storeCoinData(confidentCoins);
   await storeHistoricalCoinData(confidentCoins);
-
-  // Fetch FDV from /coins/markets and persist it for coins that have a value
-  try {
-    const coinIds = coins.map((c) => c.id);
-    const marketsData = await fetchCgMarketsData(coinIds);
-    const fdvMap: { [cgId: string]: number } = {};
-    for (const item of marketsData) {
-      if (item.id && item.fully_diluted_valuation > 0) {
-        fdvMap[item.id] = item.fully_diluted_valuation;
-      }
-    }
-    const fdvWrites = Object.entries(fdvMap).map(([cgId, fdv]) => ({
-      PK: cgPK(cgId),
-      SK: 0,
-      fdv,
-      confidence: 0.9,
-    }));
-    if (fdvWrites.length > 0) {
-      await batchWrite(fdvWrites, false);
-      sdk.log(`Wrote ${fdvWrites.length} coingecko FDV entries`);
-    }
-  } catch (e) {
-    console.error(`[scripts - getAndStoreCoins] Non-fatal error storing FDV: ${(e as Error).message}`);
-  }
 
   const filteredCoins = coins.filter(
     (coin) =>
