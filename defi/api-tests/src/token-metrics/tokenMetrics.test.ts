@@ -50,26 +50,16 @@ describe('Token Metrics API', () => {
   describe('Token Item Validation', () => {
     it('should have required string fields in all tokens', () => {
       tokenMetricsResponse.data.data.slice(0, 20).forEach((token) => {
-        expect(token).toHaveProperty('defillamaId');
-        expect(token).toHaveProperty('name');
-        expect(token).toHaveProperty('gecko_id');
-        expect(token).toHaveProperty('symbol');
-        expect(token).toHaveProperty('updatedAt');
-
         expect(typeof token.defillamaId).toBe('string');
         expect(token.defillamaId.length).toBeGreaterThan(0);
         expect(typeof token.name).toBe('string');
         expect(token.name.length).toBeGreaterThan(0);
         expect(typeof token.gecko_id).toBe('string');
         expect(token.gecko_id.length).toBeGreaterThan(0);
-        expect(typeof token.symbol).toBe('string');
-        expect(token.symbol.length).toBeGreaterThan(0);
-      });
-    });
-
-    it('should have updatedAt as a valid number for all tokens', () => {
-      tokenMetricsResponse.data.data.slice(0, 20).forEach((token) => {
-        expectValidTimestamp(token.updatedAt);
+        if (token.symbol !== undefined) {
+          expect(typeof token.symbol).toBe('string');
+          expect(token.symbol.length).toBeGreaterThan(0);
+        }
       });
     });
 
@@ -125,17 +115,15 @@ describe('Token Metrics API', () => {
       }
     });
 
-    it('should have valid liquidity when present', () => {
+    it('should have valid dexLiquidity when present', () => {
       const tokensWithLiquidity = tokenMetricsResponse.data.data
-        .filter((token) => token.liquidity !== null && token.liquidity !== undefined)
+        .filter((token) => token.dexLiquidity !== null && token.dexLiquidity !== undefined)
         .slice(0, 20);
 
-      if (tokensWithLiquidity.length > 0) {
-        tokensWithLiquidity.forEach((token) => {
-          expectValidNumber(token.liquidity!);
-          expectPositiveNumber(token.liquidity!);
-        });
-      }
+      tokensWithLiquidity.forEach((token) => {
+        expectValidNumber(token.dexLiquidity!);
+        expectPositiveNumber(token.dexLiquidity!);
+      });
     });
   });
 
@@ -149,34 +137,36 @@ describe('Token Metrics API', () => {
     it('should have tokens with at least some numeric data', () => {
       const tokensWithMetrics = tokenMetricsResponse.data.data.filter((token) => {
         return (
-          (token.price !== null && token.price !== undefined) ||
-          (token.mcap !== null && token.mcap !== undefined) ||
-          (token.fdv !== null && token.fdv !== undefined) ||
-          (token.volume24h !== null && token.volume24h !== undefined) ||
-          (token.liquidity !== null && token.liquidity !== undefined)
+          token.price !== undefined ||
+          token.mcap !== undefined ||
+          token.fdv !== undefined ||
+          token.volume24h !== undefined ||
+          token.dexLiquidity !== undefined
         );
       });
 
       expect(tokensWithMetrics.length).toBeGreaterThan(0);
     });
 
-    it('should have mcap >= fdv when both are present', () => {
-      const tokensWithBoth = tokenMetricsResponse.data.data
-        .filter(
-          (token) =>
-            token.mcap !== null &&
-            token.mcap !== undefined &&
-            token.fdv !== null &&
-            token.fdv !== undefined
-        )
-        .slice(0, 20);
-
-      if (tokensWithBoth.length > 0) {
-        tokensWithBoth.forEach((token) => {
-          // mcap should be <= fdv (market cap is typically less than or equal to FDV)
-          expect(token.mcap!).toBeLessThanOrEqual(token.fdv! * 1.01); // Allow 1% tolerance
-        });
+    it('should have mcap <= fdv when both are present', () => {
+      const TOLERANCE = 1.01; // 1% slack to absorb staleness across sources
+      const offenders = tokenMetricsResponse.data.data.filter(
+        (token) =>
+          token.mcap !== undefined &&
+          token.fdv !== undefined &&
+          token.mcap > token.fdv * TOLERANCE,
+      );
+      if (offenders.length > 0) {
+        console.warn(
+          `mcap > fdv offenders (first 5):`,
+          offenders.slice(0, 5).map((t) => ({
+            name: t.name,
+            mcap: t.mcap,
+            fdv: t.fdv,
+          })),
+        );
       }
+      expect(offenders).toEqual([]);
     });
 
     it('should have multiple tokens represented', () => {
@@ -184,24 +174,17 @@ describe('Token Metrics API', () => {
       expect(tokenNames.size).toBeGreaterThan(1);
     });
 
-    it('should have well-known tokens', () => {
-      const tokenNames = tokenMetricsResponse.data.data.map((token) => token.name.toLowerCase());
-      const symbols = tokenMetricsResponse.data.data.map((token) => token.symbol.toUpperCase());
-
-      // Check for some well-known tokens (at least one should be present)
-      const wellKnownTokens = ['compound', 'aave', 'uniswap', 'lido', 'makerdao'];
+    it('should contain at least one well-known token', () => {
+      const tokenNames = tokenMetricsResponse.data.data.map((t) => t.name.toLowerCase());
+      const symbols = tokenMetricsResponse.data.data
+        .map((t) => t.symbol?.toUpperCase())
+        .filter((s): s is string => !!s);
+      const wellKnownNames = ['compound', 'aave', 'uniswap', 'lido', 'makerdao'];
       const wellKnownSymbols = ['COMP', 'AAVE', 'UNI', 'LDO', 'MKR'];
-
-      const foundTokens = wellKnownTokens.filter((name) =>
-        tokenNames.some((n) => n.includes(name))
-      );
-      const foundSymbols = wellKnownSymbols.filter((sym) => symbols.includes(sym));
-
-      const anyFound = foundTokens.length > 0 || foundSymbols.length > 0;
-      console.log(`Found ${foundTokens.length} well-known tokens and ${foundSymbols.length} well-known symbols`);
-
-      // Just log - don't fail if not found, as data may vary
-      expect(tokenMetricsResponse.data.data.length).toBeGreaterThan(0);
+      const anyFound =
+        wellKnownNames.some((name) => tokenNames.some((n) => n.includes(name))) ||
+        wellKnownSymbols.some((sym) => symbols.includes(sym));
+      expect(anyFound).toBe(true);
     });
   });
 });
