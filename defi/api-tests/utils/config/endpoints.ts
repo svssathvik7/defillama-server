@@ -218,7 +218,7 @@ export const NEW_USERS_DIM = {
 
 export const TOKEN_METRICS = {
   BASE_URL: getProApiBaseUrl(),
-  TOKEN_METRICS: '/api/tokenMetrics',
+  TOKEN_METRICS: '/api/token-metrics',
 } as const;
 
 export const RWA = {
