@@ -24,6 +24,20 @@ interface CoingeckoResponse {
   };
 }
 
+export interface CgMarketEntry {
+  id: string;
+  symbol?: string;
+  name?: string;
+  current_price?: number;
+  market_cap?: number;
+  fully_diluted_valuation?: number;
+  total_volume?: number;
+  circulating_supply?: number;
+  total_supply?: number;
+  max_supply?: number | null;
+  last_updated?: string;
+}
+
 export const batchGetLatest = (pks: string[]) =>
   batchGet(
     pks.map((pk) => ({
@@ -92,18 +106,20 @@ export async function fetchCgPriceData(
 export async function fetchCgMarketsData(
   coinIds: string[],
   log: boolean = false,
-): Promise<any[]> {
+): Promise<CgMarketEntry[]> {
   const BATCH_SIZE = 250;
-  const results: any[] = [];
+  const results: CgMarketEntry[] = [];
   for (let i = 0; i < coinIds.length; i += BATCH_SIZE) {
     const batch = coinIds.slice(i, i + BATCH_SIZE);
-    const res = await retryCoingeckoRequest(
+    // retryCoingeckoRequest is typed for /simple/price (an object response);
+    // /coins/markets returns an array, so we narrow with Array.isArray.
+    const res = (await retryCoingeckoRequest(
       `coins/markets?vs_currency=usd&ids=${batch.join(",")}&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=false&precision=full`,
       10,
       log,
-    );
+    )) as unknown;
     if (Array.isArray(res)) {
-      results.push(...res);
+      results.push(...(res as CgMarketEntry[]));
     }
   }
   return results;
