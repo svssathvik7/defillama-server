@@ -31,10 +31,14 @@ const handler = async (
         if (redirectedCoin.Item === undefined) {
           return;
         }
-        if (redirectedCoin.Item?.fdv)
-          formattedCoin.fdv = redirectedCoin.Item?.fdv;
-        formattedCoin.timestamp = redirectedCoin.Item?.timestamp;
+        // Only adopt the redirect's timestamp when we also adopted its fdv,
+        // otherwise the response would pair a fresh timestamp with stale fdv.
+        if (redirectedCoin.Item?.fdv) {
+          formattedCoin.fdv = redirectedCoin.Item.fdv;
+          formattedCoin.timestamp = redirectedCoin.Item?.timestamp;
+        }
       }
+      if (formattedCoin.fdv === undefined) return;
       PKTransforms[coin.PK].forEach((coinName) => {
         response[coinName] = formattedCoin;
       });
