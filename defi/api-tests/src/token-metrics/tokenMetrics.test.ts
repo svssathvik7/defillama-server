@@ -137,11 +137,11 @@ describe('Token Metrics API', () => {
     it('should have tokens with at least some numeric data', () => {
       const tokensWithMetrics = tokenMetricsResponse.data.data.filter((token) => {
         return (
-          token.price !== undefined ||
-          token.mcap !== undefined ||
-          token.fdv !== undefined ||
-          token.volume24h !== undefined ||
-          token.dexLiquidity !== undefined
+          token.price != null ||
+          token.mcap != null ||
+          token.fdv != null ||
+          token.volume24h != null ||
+          token.dexLiquidity != null
         );
       });
 
@@ -158,7 +158,7 @@ describe('Token Metrics API', () => {
       const MAX_OFFENDER_RATIO = 0.02; // allow up to 2% to violate
 
       const both = tokenMetricsResponse.data.data.filter(
-        (t) => t.mcap !== undefined && t.fdv !== undefined,
+        (t) => t.mcap != null && t.fdv != null,
       );
       const offenders = both.filter((t) => t.mcap! > t.fdv! * TOLERANCE);
 

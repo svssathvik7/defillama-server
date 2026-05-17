@@ -159,7 +159,9 @@ async function _storeTokenMetrics(): Promise<void> {
   try {
     const yieldsRes = await axios.get<{
       data: Array<{ symbol?: string; tvlUsd?: number }>;
-    }>("https://yields.llama.fi/pools");
+    }>("https://yields.llama.fi/pools", {
+      timeout: 15_000,
+    });
     for (const pool of yieldsRes.data?.data ?? []) {
       if (!isPositiveFinite(pool.tvlUsd)) continue;
       if (typeof pool.symbol !== "string") continue;
