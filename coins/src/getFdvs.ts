@@ -28,11 +28,9 @@ const handler = async (
           PK: coin.redirect,
           SK: 0,
         });
-        if (redirectedCoin.Item === undefined) {
-          return;
-        }
         // Only adopt the redirect's timestamp when we also adopted its fdv,
         // otherwise the response would pair a fresh timestamp with stale fdv.
+        // If the redirect lookup missed, fall through and keep the base row.
         if (redirectedCoin.Item?.fdv !== undefined && redirectedCoin.Item?.timestamp !== undefined) {
           formattedCoin.fdv = redirectedCoin.Item.fdv;
           formattedCoin.timestamp = redirectedCoin.Item.timestamp;
