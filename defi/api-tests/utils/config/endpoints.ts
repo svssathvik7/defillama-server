@@ -216,11 +216,6 @@ export const NEW_USERS_DIM = {
   SUMMARY: (protocol: string) => `/summary/new-users/${protocol}`,
 } as const;
 
-export const TOKEN_METRICS = {
-  BASE_URL: getProApiBaseUrl(),
-  TOKEN_METRICS: '/api/token-metrics',
-} as const;
-
 export const RWA = {
   BASE_URL: BASE_URLS.RWA,
   CURRENT: '/current',
@@ -264,7 +259,6 @@ export const endpoints = {
   NFT_VOLUME,
   ACTIVE_USERS_DIM,
   NEW_USERS_DIM,
-  TOKEN_METRICS,
 } as const;
 
 export const API_CONFIG = {

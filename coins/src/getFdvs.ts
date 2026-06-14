@@ -6,12 +6,8 @@ import { getBasicCoins } from "./utils/getCoinsUtils";
 type FdvEntry = { fdv: number; timestamp: number };
 type FdvsResponse = { [coin: string]: FdvEntry };
 
-// FDV isn't stored in DDB. It already arrives — for the top coins by mcap —
-// via tokenlist/sorted.json, which storeSortedTokenlist (defi) refreshes hourly
-// from CoinGecko's /coins/markets (fully_diluted_valuation field). Read from
-// there instead of maintaining a parallel ingestion path + DDB column.
 const SORTED_TOKENLIST_KEY = "tokenlist/sorted.json";
-const CACHE_TTL_MS = 10 * 60 * 1000; // sorted.json is regenerated hourly
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
 let cache: { map: Map<string, FdvEntry>; fetchedAt: number } | undefined;
 let inflight: Promise<Map<string, FdvEntry>> | undefined;
@@ -42,9 +38,6 @@ async function loadFdvMap(): Promise<Map<string, FdvEntry>> {
   return inflight;
 }
 
-// gecko id is the suffix of a `coingecko#<id>` PK — either the coin's own PK,
-// or, for address-keyed coins, its redirect target (the same hop /mcaps follows
-// to read a redirected mcap). Returns null when no coingecko slot resolves.
 function geckoIdFromCoin(coin: { PK?: string; redirect?: string }): string | null {
   for (const key of [coin.redirect, coin.PK]) {
     if (typeof key === "string" && key.startsWith("coingecko#")) {
