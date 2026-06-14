@@ -14,8 +14,6 @@ function v4Headers(): Record<string, string> {
 }
 
 export type McapsResponse = { [coin: string]: { mcap: number; timestamp: number } };
-export type FdvsResponse = { [coin: string]: { fdv: number; timestamp: number } };
-export type CoinVolumesResponse = { [coin: string]: { volume: number; timestamp: number } };
 
 export type TokenListEntry = {
   address: string;
@@ -41,44 +39,6 @@ export async function fetchMcaps(
   }
   const r = await axios.post(
     `${LEGACY_BASE}/mcaps`,
-    { coins },
-    { params: opts.legacyApiKey ? { apikey: opts.legacyApiKey } : undefined },
-  );
-  return r.data;
-}
-
-// Routes to v4 when COINS_V4_API_URL is set, else coins.llama.fi/fdvs.
-export async function fetchFdvs(
-  coins: string[],
-  opts: { legacyApiKey?: string } = {},
-): Promise<FdvsResponse> {
-  if (!coins.length) return {};
-  const base = v4Base();
-  if (base) {
-    const r = await axios.post(`${base}/fdvs`, { coins }, { headers: v4Headers() });
-    return r.data;
-  }
-  const r = await axios.post(
-    `${LEGACY_BASE}/fdvs`,
-    { coins },
-    { params: opts.legacyApiKey ? { apikey: opts.legacyApiKey } : undefined },
-  );
-  return r.data;
-}
-
-// Routes to v4 when COINS_V4_API_URL is set, else coins.llama.fi/coinVolumes.
-export async function fetchCoinVolumes(
-  coins: string[],
-  opts: { legacyApiKey?: string } = {},
-): Promise<CoinVolumesResponse> {
-  if (!coins.length) return {};
-  const base = v4Base();
-  if (base) {
-    const r = await axios.post(`${base}/coinVolumes`, { coins }, { headers: v4Headers() });
-    return r.data;
-  }
-  const r = await axios.post(
-    `${LEGACY_BASE}/coinVolumes`,
     { coins },
     { params: opts.legacyApiKey ? { apikey: opts.legacyApiKey } : undefined },
   );
